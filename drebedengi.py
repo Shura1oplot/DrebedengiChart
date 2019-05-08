@@ -385,7 +385,7 @@ def main(argv=sys.argv):
         metavar="FILE",
         help="chart query file (special header + SQL)")
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv[1:])
 
     if args.number <= 0:
         raise ValueError("`--number` must be greater than or equal to 1")
