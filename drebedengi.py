@@ -31,6 +31,7 @@ html_template = """
             function drawChart() {
               var data = google.visualization.arrayToDataTable(%s);
               var options = {
+                title: %s,
                 legend: {position: 'top'},
                 // height: 400,
                 colors: ['#1b9e77', '#d95f02', '#39648c', '#6d398c', '#8c3939'],
@@ -252,32 +253,12 @@ def load_query(file):
     return fields, sql
 
 
-def query_data(conn, sql, fields, n):
-    dates = []
-
-    today = datetime.datetime.today()
-    m0 = today.month
-    y0 = today.year
-
-    dates.append(datetime.datetime(
-        y0 + m0 // 12,
-        m0 % 12 + 1,
-        1, 0, 0, 0
-    ))
-
-    for i in range(n):
-        m1 = (m0 - i - 1) % 12 + 1
-        y1 = y0 - (i + 12 - m0) // 12
-        dates.append(datetime.datetime(y1, m1, 1, 0, 0, 0))
-
-    date_iter = iter(dates)
-    next(date_iter)
-
+def query_data(conn, sql, fields, n, mode):
     cur = conn.cursor()
 
     result = []
 
-    for date0, date1 in zip(dates, date_iter):
+    for date0, date1 in date_iter(mode, n):
         date0_str = "{:%Y-%m-%d %H:%M:%S}".format(date0)
         date1_str = "{:%Y-%m-%d %H:%M:%S}".format(date1)
 
@@ -293,7 +274,67 @@ def query_data(conn, sql, fields, n):
     return result
 
 
-def get_chart_html(data, fields):
+def date_iter(mode, n):
+    if mode == 1:
+        return date_iter_by_month(n)
+    elif mode == 2:
+        return date_iter_by_year(n)
+    elif mode == 3:
+        return date_iter_by_year_aggr(n)
+
+
+def date_iter_by_month(n):
+    dates0 = []
+
+    today = datetime.datetime.today()
+    m0 = today.month
+    y0 = today.year
+
+    dates0.append(datetime.datetime(
+        y0 + m0 // 12,
+        m0 % 12 + 1,
+        1, 0, 0, 0
+    ))
+
+    for i in range(n):
+        m1 = (m0 - i - 1) % 12 + 1
+        y1 = y0 - (i + 12 - m0) // 12
+        dates0.append(datetime.datetime(y1, m1, 1, 0, 0, 0))
+
+    date1 = iter(dates0)
+    next(date1)
+
+    return zip(dates0, date1)
+
+
+def date_iter_by_year(n):
+    today = datetime.datetime.today()
+    y0 = today.year
+
+    for i in range(n):
+        yield (
+            datetime.datetime(y0 - i, 1, 1, 0, 0, 0),
+            datetime.datetime(y0, 1, 1, 0, 0, 0),
+        )
+
+
+def date_iter_by_year_aggr(n):
+    today = datetime.datetime.today()
+    y0 = today.year
+
+    tomorrow = today + datetime.timedelta(days=1)
+    d1 = tomorrow.day
+    m1 = tomorrow.month
+    y1 = tomorrow.year
+
+    for i in range(n):
+        yield (
+            datetime.datetime(y0 - i, 1, 1, 0, 0, 0),
+            datetime.datetime(y1 - i, m1, d1, 0, 0, 0),
+        )
+
+
+def get_chart_html(data, fields, title):
     header = ["Месяц", ]
 
     for field in fields:
@@ -314,7 +355,7 @@ def get_chart_html(data, fields):
 
         json_data.append(item)
 
-    return html_template % (json.dumps(json_data),)
+    return html_template % (json.dumps(title), json.dumps(json_data),)
 
 
 def open_in_brewser(html_file):
@@ -324,8 +365,7 @@ def open_in_brewser(html_file):
     elif sys.platform == "linux":
         subprocess.call(("xdg-open", html_file))
 
-    elif sys.platform == "ios":
-        # pythonista
+    elif sys.platform == "ios":  # pythonista
         import ui
 
         webview = ui.WebView(name="Drebedengi Chart")
@@ -341,6 +381,15 @@ def open_in_brewser(html_file):
 
 def main(argv=sys.argv):
     parser = argparse.ArgumentParser(description="Drebedengi Chart")
+
+    parser.add_argument(
+        "-m", "--mode",
+        type=int,
+        choices=(1, 2, 3),
+        default=1,
+        metavar="N",
+        help=("mode: 1 - by month, 2 - by year, 3 - by year up to today "
+              "(default: 1)"))
 
     parser.add_argument(
         "-c", "--credentials",
@@ -414,7 +463,7 @@ def main(argv=sys.argv):
         backup_data = download_backup(login, password)
         init_database(conn, backup_data)
 
-    result = query_data(conn, sql, fields, args.number)
+    result = query_data(conn, sql, fields, args.number, args.mode)
     conn.close()
 
     if args.save_json:
@@ -423,7 +472,11 @@ def main(argv=sys.argv):
 
     if args.save_html:
         with open(args.save_html, "w", encoding="utf-8") as fp:
-            fp.write(get_chart_html(result, fields))
+            fp.write(get_chart_html(
+                result,
+                fields,
+                "mode: {}".format(args.mode)
+            ))
 
         if args.open:
             open_in_brewser(args.save_html)
