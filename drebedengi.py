@@ -262,7 +262,7 @@ def query_data(conn, sql, fields, n, mode):
         date0_str = "{:%Y-%m-%d %H:%M:%S}".format(date0)
         date1_str = "{:%Y-%m-%d %H:%M:%S}".format(date1)
 
-        item = [date1.year, date1.month]
+        item = [date0.year, date0.month]
 
         for field in fields:
             cur.execute(sql, (field, date0_str, date1_str))
@@ -301,10 +301,10 @@ def date_iter_by_month(n):
         y1 = y0 - (i + 12 - m0) // 12
         dates0.append(datetime.datetime(y1, m1, 1, 0, 0, 0))
 
-    date1 = iter(dates0)
-    next(date1)
+    dates1 = iter(dates0)
+    next(dates1)
 
-    return zip(dates0, date1)
+    return zip(dates1, dates0)
 
 
 def date_iter_by_year(n):
@@ -314,7 +314,7 @@ def date_iter_by_year(n):
     for i in range(n):
         yield (
             datetime.datetime(y0 - i, 1, 1, 0, 0, 0),
-            datetime.datetime(y0, 1, 1, 0, 0, 0),
+            datetime.datetime(y0 - i + 1, 1, 1, 0, 0, 0),
         )
 
 
@@ -355,7 +355,7 @@ def get_chart_html(data, fields, title):
 
         json_data.append(item)
 
-    return html_template % (json.dumps(title), json.dumps(json_data),)
+    return html_template % (json.dumps(json_data), json.dumps(title))
 
 
 def open_in_brewser(html_file):

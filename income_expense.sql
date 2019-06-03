@@ -12,5 +12,5 @@ SELECT ABS(SUM(r.[sum] * c.course)) AS [sum]
                          WHEN 'Расход' THEN 3
                          ELSE NULL
                   END
+   AND r.[date] >= ?
    AND r.[date] < ?
-   AND r.[date] > ?
