@@ -5,6 +5,7 @@ import sys
 import os
 import codecs
 import io
+import re
 import datetime
 import json
 import csv
@@ -130,11 +131,11 @@ def download_backup(login, password):
     return data
 
 
-def init_database(conn, data):
+def init_database(conn, data, custom_tables):
     cur = conn.cursor()
     cur.execute("""
         CREATE TABLE currency (
-            [id] int not null,
+            [id] int NOT NULL,
             [name] text,
             [course] numeric(18,4),
             [code] text,
@@ -145,7 +146,7 @@ def init_database(conn, data):
     """)
     cur.execute("""
         CREATE TABLE objects (
-            [id] int not null,
+            [id] int NOT NULL,
             [parent_id] int,
             [type] int,
             [name] text,
@@ -160,6 +161,7 @@ def init_database(conn, data):
     """)
     cur.execute("""
         CREATE TABLE records (
+            [id] int NOT NULL,
             [sum] int,
             [currency_id] int,
             [object_id] int,
@@ -168,6 +170,12 @@ def init_database(conn, data):
             [comment] text,
             [user_id] int,
             [group_id] int
+        );
+    """)
+    cur.execute("""
+        CREATE TABLE tags (
+            [record_id] int NOT NULL,
+            [tag] text NOT NULL
         );
     """)
     conn.commit()
@@ -200,10 +208,11 @@ def init_database(conn, data):
                      {"t": 1, "f": 0}[is_autohide],
                      ))
 
-    for sum_, currency_id, object_id, account_id, date, comment, user_id, \
-            group_id in data["records"]:
-        cur.execute("INSERT INTO records VALUES (?,?,?,?,?,?,?,?)",
-                    (sum_,
+    for id_, (sum_, currency_id, object_id, account_id, date, \
+            comment, user_id, group_id) in enumerate(data["records"]):
+        cur.execute("INSERT INTO records VALUES (?,?,?,?,?,?,?,?,?)",
+                    (id_,
+                     sum_,
                      currency_id,
                      object_id,
                      account_id,
@@ -212,6 +221,48 @@ def init_database(conn, data):
                      user_id,
                      group_id,
                      ))
+
+    for id_, (_, _, _, _, _, comment, _, _) in enumerate(data["records"]):
+        for tag in re.findall(r"\[([^[\]]+)\]", comment):
+            cur.execute("INSERT INTO tags VALUES (?,?)", (id_, tag))
+
+    conn.commit()
+
+    for table_file in (custom_tables or []):
+        table_name, _ = os.path.splitext(os.path.basename(table_file))
+        table_name = table_name.lstrip("_")
+
+        if not re.match(r"^[a-z][a-z0-9_]*$", table_name, re.I):
+            raise ValueError(table_file)
+
+        with open(table_file) as fp:
+            csvfile = csv.reader(fp, delimiter=";")
+            it = iter(csvfile)
+
+            header = next(it)
+            schema = []
+            types = []
+
+            for col_name in header:
+                if not re.match(r"^[a-z][a-z0-9_]*$", col_name, re.I):
+                    raise ValueError(col_name)
+
+                if col_name.startswith("is_") \
+                        or col_name.endswith("_id") \
+                        or col_name == "id":
+                    schema.append((col_name, "int"))
+                    types.append(int)
+                else:
+                    schema.append((col_name, "text"))
+                    types.append(str)
+
+            cur.execute("CREATE TABLE [{}] ({});".format(
+                table_name, ",".join("[{}] {}".format(*x) for x in schema)))
+
+            for row in it:
+                cur.execute("INSERT INTO [{}] VALUES ({})".format(
+                            table_name, ("?," * len(row)).rstrip(",")),
+                            tuple(f(x) for f, x in zip(types, row)))
 
     conn.commit()
     cur.close()
@@ -405,7 +456,7 @@ def main(argv=sys.argv):
     parser.add_argument(
         "-u", "--update",
         action="store_true",
-        help="download new backup from the drebedengi.ru")
+        help="download new backup from drebedengi.ru")
 
     parser.add_argument(
         "-n", "--number",
@@ -426,8 +477,15 @@ def main(argv=sys.argv):
     parser.add_argument(
         "-x", "--open",
         action="store_true",
-        help=("show the chart in OS default browser "
+        help=("show output chart in OS default browser "
               "(must be used with `--save-json`)"))
+
+    parser.add_argument(
+        "-a", "--add-table",
+        dest="custom_tables",
+        action="append",
+        metavar="FILE",
+        help="add custom table to the database from the file specified")
 
     parser.add_argument(
         "query",
@@ -461,7 +519,7 @@ def main(argv=sys.argv):
     if need_update:
         login, password = load_credentials(args.credentials)
         backup_data = download_backup(login, password)
-        init_database(conn, backup_data)
+        init_database(conn, backup_data, args.custom_tables)
 
     result = query_data(conn, sql, fields, args.number, args.mode)
     conn.close()
